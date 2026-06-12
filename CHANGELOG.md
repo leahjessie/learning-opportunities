@@ -1,5 +1,18 @@
 # Changelog
 
+## learning-opportunities-auto 1.0.3
+
+Hardens the commit-detection trigger so the nudge fires only on real commits.
+
+**Fixed:**
+- Scoped commit detection to the command text instead of the whole hook payload, so a command whose *output* merely printed "git" and "commit" (e.g. reading a file that mentions them) no longer fires a spurious nudge.
+- Tightened the matcher to require `commit` as the git *subcommand*: intermediate tokens must be flags, so common agent commands like `git log <sha>` and `git show <sha>` (where `commit`/a SHA is an argument) no longer match. Anchored to the start of the command or a shell separator so prefixes like `foogit commit` don't match.
+
+**Changed:**
+- The offer counter now increments only when a nudge is actually emitted, de-duped per commit SHA, so non-committing calls and repeated hook invocations can't silently burn the per-session offer quota.
+- Failed commits (e.g. rejected by a pre-commit hook) are now skipped by checking HEAD's commit timestamp, avoiding nudges about stale work.
+- The nudge now includes the short SHA and commit subject so the skill has a concrete topic handle.
+
 ## learning-opportunities-auto 1.0.2
 
 **Fixed:**

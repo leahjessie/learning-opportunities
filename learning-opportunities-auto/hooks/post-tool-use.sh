@@ -24,10 +24,26 @@ INPUT=$(cat)
 
 CMD=$(echo "$INPUT" | grep -oE '"(command|cmd)":"([^"\\]|\\.)*"' | head -1 | sed -E 's/^"(command|cmd)":"//; s/"$//')
 
-# Require `git ... commit` where `commit` is a standalone subcommand word.
-# Intermediate tokens may not contain a quote, so a quoted message containing
-# the word "commit" (e.g. git push -m "ready to commit") won't match.
-if ! printf '%s' "$CMD" | grep -Eq 'git[[:space:]]+([^[:space:]"]+[[:space:]]+)*commit([[:space:]]|$)'; then
+# Require `git commit` where `commit` is the SUBCOMMAND, not an argument.
+# The regex, piece by piece:
+#
+#   (^|[;&|`(][[:space:]]*|\$\([[:space:]]*)
+#     Anchor: start of command, or right after a shell separator
+#     (`;` `&` `|` backtick `(`) or a `$(` substitution. Stops `foogit commit`.
+#
+#   git
+#     The literal command.
+#
+#   ([[:space:]]+-[^[:space:]"]+([[:space:]]+[^-[:space:]"][^[:space:]"]*)?)*
+#     Zero or more global-flag blocks: `<space>-flag` optionally followed by a
+#     non-flag value. Intermediate tokens must be FLAGS, so `git log commit`
+#     and `git show commit abc123` (commit as an argument) don't match, while
+#     `git -c foo=bar commit` still does.
+#
+#   [[:space:]]+commit([[:space:]";|&)]|$|\\)
+#     The `commit` subcommand, terminated by whitespace / quote / separator /
+#     end / backslash — so `git commit-tree` won't match.
+if ! printf '%s' "$CMD" | grep -Eq '(^|[;&|`(][[:space:]]*|\$\([[:space:]]*)git([[:space:]]+-[^[:space:]"]+([[:space:]]+[^-[:space:]"][^[:space:]"]*)?)*[[:space:]]+commit([[:space:]";|&)]|$|\\)'; then
   exit 0
 fi
 
