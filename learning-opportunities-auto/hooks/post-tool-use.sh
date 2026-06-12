@@ -14,12 +14,20 @@ INPUT=$(cat)
 
 # ---------------------------------------------------------------------------
 # Check if this was a git commit. Claude Code sends shell text in a "command"
-# field; Codex can send it in a "cmd" field. False positives (e.g., output
-# that mentions "git commit") are harmless — we just offer a learning exercise
-# unnecessarily.
+# field; Codex can send it in a "cmd" field.
+#
+# Match the COMMAND TEXT ONLY, never the full payload: a PostToolUse payload
+# also carries the command's output (tool_response), so grepping the whole blob
+# fires on any command whose output merely prints "git" and "commit" (e.g.
+# reading a file that mentions them). Extract just the command value first.
 # ---------------------------------------------------------------------------
 
-if ! echo "$INPUT" | grep -Eq '"(command|cmd)".*git.*commit'; then
+CMD=$(echo "$INPUT" | grep -oE '"(command|cmd)":"([^"\\]|\\.)*"' | head -1 | sed -E 's/^"(command|cmd)":"//; s/"$//')
+
+# Require `git ... commit` where `commit` is a standalone subcommand word.
+# Intermediate tokens may not contain a quote, so a quoted message containing
+# the word "commit" (e.g. git push -m "ready to commit") won't match.
+if ! printf '%s' "$CMD" | grep -Eq 'git[[:space:]]+([^[:space:]"]+[[:space:]]+)*commit([[:space:]]|$)'; then
   exit 0
 fi
 
