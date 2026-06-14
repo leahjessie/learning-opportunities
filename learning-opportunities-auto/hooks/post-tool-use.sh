@@ -27,9 +27,14 @@ CMD=$(echo "$INPUT" | grep -oE '"(command|cmd)":"([^"\\]|\\.)*"' | head -1 | sed
 # Require `git commit` where `commit` is the SUBCOMMAND, not an argument.
 # The regex, piece by piece:
 #
-#   (^|[;&|`(][[:space:]]*|\$\([[:space:]]*)
-#     Anchor: start of command, or right after a shell separator
-#     (`;` `&` `|` backtick `(`) or a `$(` substitution. Stops `foogit commit`.
+#   (^|[;&|`(][[:space:]]*|\$\([[:space:]]*|\\[nr][[:space:]]*)
+#     Anchor: start of command, right after a shell separator
+#     (`;` `&` `|` backtick `(`), a `$(` substitution, or an escaped newline /
+#     carriage return. Multi-line commands arrive as a JSON string with their
+#     newlines escaped to the literal two chars `\n` (`\r`), so a statement like
+#     `git add .\ngit commit -m x` keeps `commit` on one grep line — without
+#     treating `\n`/`\r` as a separator, the second statement's `git commit`
+#     would go unmatched. Stops `foogit commit` (no separator before `git`).
 #
 #   git
 #     The literal command.
@@ -43,7 +48,7 @@ CMD=$(echo "$INPUT" | grep -oE '"(command|cmd)":"([^"\\]|\\.)*"' | head -1 | sed
 #   [[:space:]]+commit([[:space:]";|&)]|$|\\)
 #     The `commit` subcommand, terminated by whitespace / quote / separator /
 #     end / backslash — so `git commit-tree` won't match.
-if ! printf '%s' "$CMD" | grep -Eq '(^|[;&|`(][[:space:]]*|\$\([[:space:]]*)git([[:space:]]+-[^[:space:]"]+([[:space:]]+[^-[:space:]"][^[:space:]"]*)?)*[[:space:]]+commit([[:space:]";|&)]|$|\\)'; then
+if ! printf '%s' "$CMD" | grep -Eq '(^|[;&|`(][[:space:]]*|\$\([[:space:]]*|\\[nr][[:space:]]*)git([[:space:]]+-[^[:space:]"]+([[:space:]]+[^-[:space:]"][^[:space:]"]*)?)*[[:space:]]+commit([[:space:]";|&)]|$|\\)'; then
   exit 0
 fi
 
@@ -74,15 +79,25 @@ if [[ -z "$SHA" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Verify the commit actually landed. If HEAD's commit timestamp isn't
-# very recent, the `git commit` call likely failed (e.g. pre-commit hook
-# rejected it) and HEAD is still the *previous* commit — in which case
-# we'd nudge about stale work. Skip silently in that case.
+# Verify the commit actually landed and is THIS commit, not stale work.
+#
+# We key off the reflog ref-update time, NOT the committer timestamp (%ct).
+# %ct is stamped when git assembles the commit metadata — *before* it creates
+# the (possibly signed) commit object. With signed commits authorized through
+# an interactive prompt (e.g. 1Password / Touch ID), the approval can take
+# tens of seconds, so by the time the commit lands %ct is already "old" and a
+# naive freshness check bails on a perfectly good commit.
+#
+# The reflog entry for HEAD@{0} is written when the ref actually updates —
+# *after* signing — so its timestamp is genuinely "now" the moment the commit
+# lands, regardless of how long approval took. A failed `git commit` writes no
+# reflog entry, so HEAD@{0} stays the previous (older) entry and we still skip
+# silently. `--date=unix` renders the selector as HEAD@{<unixtime>}.
 # ---------------------------------------------------------------------------
 
-COMMIT_TS=$(git -C "$CWD" log -1 --format=%ct 2>/dev/null) || exit 0
+REF_TS=$(git -C "$CWD" reflog -1 --date=unix --format='%gd' 2>/dev/null | grep -oE '[0-9]+') || exit 0
 NOW=$(date +%s)
-if (( NOW - COMMIT_TS > 30 )); then
+if [[ -z "$REF_TS" ]] || (( NOW - REF_TS > 30 )); then
   exit 0
 fi
 

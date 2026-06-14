@@ -1,5 +1,13 @@
 # Changelog
 
+## learning-opportunities-auto 1.0.4
+
+Fixes two cases where a real `git commit` failed to trigger the nudge.
+
+**Fixed:**
+- The "did the commit just land?" check now keys off the reflog ref-update time of `HEAD@{0}` instead of the committer timestamp (`%ct`). `%ct` is stamped before the commit object is created, so a signed commit whose approval prompt takes longer than the 30s window left `%ct` stale and the hook silently bailed on a perfectly good commit. The reflog entry is written after signing, so the check is now immune to approval latency while still skipping genuinely failed commits (which write no reflog entry).
+- Multi-line commands now match. The Bash tool sends a multi-line command as a JSON string with newlines escaped to the literal chars `\n`, so a statement like `git add .\ngit commit -m x` kept `commit` on a single grep line preceded by `\n` — which the subcommand matcher didn't treat as a statement separator, so the nudge never fired. The anchor now recognizes escaped `\n`/`\r` as separators (alongside `;`, `&`, `|`, backtick, `(`, and `$(`). `&&`-joined and single-line commits were unaffected.
+
 ## learning-opportunities-auto 1.0.3
 
 Hardens the commit-detection trigger so the nudge fires only on real commits.
